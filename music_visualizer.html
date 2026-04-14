@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Music Visualizer</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { background: #000; width: 100%; height: 100%; overflow: hidden; }
+  #root {
+    width: 100vw;
+    height: 100vh;
+    background: #000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    font-family: 'Courier New', monospace;
+    position: relative;
+    overflow: hidden;
+  }
+  #bg-canvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 0;
+  }
+  #vis-canvas {
+    position: absolute;
+    bottom: 0; left: 0;
+    width: 100%; height: 60%;
+    z-index: 1;
+  }
+  .ui-layer {
+    position: relative;
+    z-index: 2;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 32px 16px 16px;
+  }
+  .track-title {
+    font-size: 13px;
+    letter-spacing: 0.25em;
+    color: rgba(255,255,255,0.5);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .now-playing {
+    font-size: 22px;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: 0.05em;
+    margin-bottom: 24px;
+    text-shadow: 0 0 30px rgba(180,100,255,0.6);
+  }
+  .upload-btn {
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 13px;
+    padding: 10px 20px;
+    cursor: pointer;
+    letter-spacing: 0.08em;
+    transition: background 0.2s;
+    margin-bottom: 16px;
+    font-family: 'Courier New', monospace;
+  }
+  .upload-btn:hover { background: rgba(255,255,255,0.15); }
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 14px;
+  }
+  .play-btn {
+    width: 52px; height: 52px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #b46aff, #6a8fff);
+    border: none;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px;
+    color: #fff;
+    transition: transform 0.15s;
+    box-shadow: 0 0 24px rgba(140,80,255,0.5);
+  }
+  .play-btn:hover { transform: scale(1.08); }
+  .progress-wrap {
+    width: min(380px, 80vw);
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .progress-bar {
+    width: 100%;
+    height: 4px;
+    background: rgba(255,255,255,0.12);
+    border-radius: 2px;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+  }
+  #progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #b46aff, #6a8fff);
+    border-radius: 2px;
+    width: 0%;
+    transition: width 0.1s linear;
+  }
+  .time-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: rgba(255,255,255,0.4);
+    letter-spacing: 0.05em;
+  }
+  .viz-mode-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .mode-btn {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 20px;
+    color: rgba(255,255,255,0.55);
+    font-size: 11px;
+    padding: 5px 14px;
+    cursor: pointer;
+    letter-spacing: 0.07em;
+    transition: all 0.2s;
+    font-family: 'Courier New', monospace;
+  }
+  .mode-btn.active {
+    background: rgba(140,80,255,0.3);
+    border-color: rgba(180,100,255,0.6);
+    color: #fff;
+  }
+  .drop-hint {
+    font-size: 12px;
+    color: rgba(255,255,255,0.3);
+    margin-top: 8px;
+    letter-spacing: 0.05em;
+  }
+</style>
+</head>
+<body>
+<div id="root">
+  <canvas id="bg-canvas"></canvas>
+  <canvas id="vis-canvas"></canvas>
+  <div class="ui-layer">
+    <div class="track-title">now playing</div>
+    <div class="now-playing" id="track-name">Load a track to begin</div>
+    <div class="viz-mode-row">
+      <button class="mode-btn active" onclick="setMode('bars')" id="btn-bars">BARS</button>
+      <button class="mode-btn" onclick="setMode('wave')" id="btn-wave">WAVE</button>
+      <button class="mode-btn" onclick="setMode('radial')" id="btn-radial">RADIAL</button>
+      <button class="mode-btn" onclick="setMode('spiral')" id="btn-spiral">SPIRAL</button>
+    </div>
+    <div class="controls">
+      <button class="play-btn" id="play-btn" onclick="togglePlay()">▶</button>
+      <div class="progress-wrap">
+        <div class="progress-bar" id="progress-bar" onclick="seek(event)">
+          <div id="progress-fill"></div>
+        </div>
+        <div class="time-row">
+          <span id="cur-time">0:00</span>
+          <span id="dur-time">0:00</span>
+        </div>
+      </div>
+    </div>
+    <label class="upload-btn" for="file-input">⬆ Load track</label>
+    <input type="file" id="file-input" accept="audio/*" style="display:none" onchange="loadFile(event)">
+    <div class="drop-hint" id="hint">select a track above to start</div>
+  </div>
+</div>
+
+<script>
+let audioCtx, analyser, source, audioBuffer, gainNode;
+let isPlaying = false, startTime = 0, pauseOffset = 0;
+let mode = 'bars';
+let animId;
+let hue = 260;
+let particles = [];
+
+const bgCanvas = document.getElementById('bg-canvas');
+const visCanvas = document.getElementById('vis-canvas');
+const bgCtx = bgCanvas.getContext('2d');
+const visCtx = visCanvas.getContext('2d');
+
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  bgCanvas.width = w; bgCanvas.height = h;
+  visCanvas.width = w; visCanvas.height = h * 0.6;
+}
+resize();
+window.addEventListener('resize', resize);
+
+function fmt(s) {
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return m + ':' + (sec < 10 ? '0' : '') + sec;
+}
+
+function setMode(m) {
+  mode = m;
+  ['bars','wave','radial','spiral'].forEach(k => {
+    document.getElementById('btn-' + k).classList.toggle('active', k === m);
+  });
+}
+
+async function initAudio(buffer) {
+  if (audioCtx) { audioCtx.close(); }
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 2048;
+  gainNode = audioCtx.createGain();
+  gainNode.connect(audioCtx.destination);
+  analyser.connect(gainNode);
+  audioBuffer = buffer;
+  document.getElementById('dur-time').textContent = fmt(buffer.duration);
+}
+
+function playFrom(offset) {
+  if (source) { try { source.stop(); } catch(e){} }
+  source = audioCtx.createBufferSource();
+  source.buffer = audioBuffer;
+  source.connect(analyser);
+  source.start(0, offset);
+  startTime = audioCtx.currentTime - offset;
+  source.onended = () => {
+    if (isPlaying) {
+      isPlaying = false;
+      pauseOffset = 0;
+      document.getElementById('play-btn').textContent = '▶';
+    }
+  };
+}
+
+function togglePlay() {
+  if (!audioBuffer) { document.getElementById('hint').textContent = 'Load a track first'; return; }
+  if (!isPlaying) {
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    playFrom(pauseOffset);
+    isPlaying = true;
+    document.getElementById('play-btn').textContent = '⏸';
+    document.getElementById('hint').textContent = '';
+    loop();
+  } else {
+    pauseOffset = audioCtx.currentTime - startTime;
+    source.stop();
+    isPlaying = false;
+    document.getElementById('play-btn').textContent = '▶';
+    cancelAnimationFrame(animId);
+  }
+}
+
+function seek(e) {
+  if (!audioBuffer) return;
+  const bar = document.getElementById('progress-bar');
+  const ratio = e.offsetX / bar.offsetWidth;
+  const t = ratio * audioBuffer.duration;
+  pauseOffset = t;
+  if (isPlaying) { playFrom(t); }
+  document.getElementById('progress-fill').style.width = (ratio * 100) + '%';
+  document.getElementById('cur-time').textContent = fmt(t);
+}
+
+function loadFile(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  document.getElementById('track-name').textContent = file.name.replace(/\.[^.]+$/, '');
+  const reader = new FileReader();
+  reader.onload = async ev => {
+    const tmpCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const buf = await tmpCtx.decodeAudioData(ev.target.result);
+    tmpCtx.close();
+    if (isPlaying) { source.stop(); isPlaying = false; document.getElementById('play-btn').textContent = '▶'; cancelAnimationFrame(animId); }
+    pauseOffset = 0;
+    await initAudio(buf);
+    document.getElementById('hint').textContent = 'tap ▶ to play';
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function addParticle(x, y, mag) {
+  particles.push({ x, y, vx: (Math.random()-0.5)*3*mag, vy: -Math.random()*4*mag - 1, life: 1, size: Math.random()*3+1, hue: hue + Math.random()*40-20 });
+}
+
+function drawBg(energy) {
+  const w = bgCanvas.width, h = bgCanvas.height;
+  bgCtx.fillStyle = 'rgba(0,0,0,0.18)';
+  bgCtx.fillRect(0, 0, w, h);
+  const r = Math.min(w, h) * 0.45 + energy * 60;
+  const grd = bgCtx.createRadialGradient(w/2, h/2, 0, w/2, h/2, r);
+  const a = 0.07 + energy * 0.12;
+  grd.addColorStop(0, `hsla(${hue},80%,60%,${a})`);
+  grd.addColorStop(1, 'hsla(0,0%,0%,0)');
+  bgCtx.fillStyle = grd;
+  bgCtx.fillRect(0, 0, w, h);
+}
+
+function drawBars(data, energy) {
+  const w = visCanvas.width, h = visCanvas.height;
+  visCtx.clearRect(0, 0, w, h);
+  const count = 80;
+  const bw = w / count - 1.5;
+  for (let i = 0; i < count; i++) {
+    const idx = Math.floor(i / count * data.length * 0.6);
+    const val = data[idx] / 255;
+    const bh = val * h * 0.9;
+    const x = i * (bw + 1.5);
+    const hh = hue + i * 1.2;
+    const grd = visCtx.createLinearGradient(0, h, 0, h - bh);
+    grd.addColorStop(0, `hsla(${hh},90%,55%,0.9)`);
+    grd.addColorStop(1, `hsla(${hh+40},95%,75%,0.6)`);
+    visCtx.fillStyle = grd;
+    visCtx.beginPath();
+    visCtx.roundRect(x, h - bh, bw, bh, 2);
+    visCtx.fill();
+    if (val > 0.7 && Math.random() < 0.15) addParticle(x + bw/2, h - bh, val);
+  }
+}
+
+function drawWave(data) {
+  const w = visCanvas.width, h = visCanvas.height;
+  visCtx.clearRect(0, 0, w, h);
+  visCtx.strokeStyle = `hsla(${hue},90%,65%,0.9)`;
+  visCtx.lineWidth = 2;
+  visCtx.shadowBlur = 12;
+  visCtx.shadowColor = `hsla(${hue},80%,60%,0.6)`;
+  visCtx.beginPath();
+  for (let i = 0; i < data.length; i++) {
+    const x = (i / data.length) * w;
+    const y = h/2 + (data[i] - 128) / 128 * h * 0.42;
+    i === 0 ? visCtx.moveTo(x, y) : visCtx.lineTo(x, y);
+  }
+  visCtx.stroke();
+  visCtx.shadowBlur = 0;
+}
+
+function drawRadial(data, energy) {
+  const w = visCanvas.width, h = visCanvas.height;
+  visCtx.clearRect(0, 0, w, h);
+  const cx = w/2, cy = h/2;
+  const baseR = Math.min(w,h)*0.18 + energy*20;
+  const count = 128;
+  for (let i = 0; i < count; i++) {
+    const idx = Math.floor(i / count * data.length * 0.5);
+    const val = data[idx] / 255;
+    const angle = (i / count) * Math.PI * 2;
+    const r1 = baseR;
+    const r2 = baseR + val * Math.min(w,h) * 0.28;
+    const hh = hue + i*2.8;
+    visCtx.strokeStyle = `hsla(${hh},90%,65%,0.85)`;
+    visCtx.lineWidth = 2;
+    visCtx.beginPath();
+    visCtx.moveTo(cx + Math.cos(angle)*r1, cy + Math.sin(angle)*r1);
+    visCtx.lineTo(cx + Math.cos(angle)*r2, cy + Math.sin(angle)*r2);
+    visCtx.stroke();
+    if (val > 0.75 && Math.random() < 0.1) addParticle(cx + Math.cos(angle)*r2, cy + Math.sin(angle)*r2, val);
+  }
+  visCtx.beginPath();
+  visCtx.arc(cx, cy, baseR-2, 0, Math.PI*2);
+  visCtx.strokeStyle = `hsla(${hue},70%,70%,0.3)`;
+  visCtx.lineWidth = 1;
+  visCtx.stroke();
+}
+
+function drawSpiral(data, t) {
+  const w = visCanvas.width, h = visCanvas.height;
+  visCtx.clearRect(0, 0, w, h);
+  const cx = w/2, cy = h/2;
+  const count = 200;
+  for (let i = 0; i < count; i++) {
+    const idx = Math.floor(i / count * data.length * 0.7);
+    const val = data[idx] / 255;
+    const angle = (i / count) * Math.PI * 8 + t * 0.3;
+    const r = (i / count) * Math.min(w,h)*0.38 * (0.7 + val*0.6);
+    const x = cx + Math.cos(angle) * r;
+    const y = cy + Math.sin(angle) * r;
+    const sz = 1.5 + val * 4;
+    const hh = hue + i * 1.5;
+    visCtx.beginPath();
+    visCtx.arc(x, y, sz/2, 0, Math.PI*2);
+    visCtx.fillStyle = `hsla(${hh},90%,65%,${0.4 + val*0.5})`;
+    visCtx.fill();
+  }
+}
+
+function drawParticles() {
+  particles = particles.filter(p => p.life > 0);
+  particles.forEach(p => {
+    visCtx.beginPath();
+    visCtx.arc(p.x, p.y, p.size * p.life, 0, Math.PI*2);
+    visCtx.fillStyle = `hsla(${p.hue},90%,70%,${p.life*0.8})`;
+    visCtx.fill();
+    p.x += p.vx; p.y += p.vy;
+    p.vy += 0.12;
+    p.life -= 0.025;
+  });
+}
+
+let tick = 0;
+function loop() {
+  if (!isPlaying) return;
+  animId = requestAnimationFrame(loop);
+  tick++;
+  hue = (hue + 0.15) % 360;
+
+  const freqData = new Uint8Array(analyser.frequencyBinCount);
+  const timeData = new Uint8Array(analyser.fftSize);
+  analyser.getByteFrequencyData(freqData);
+  analyser.getByteTimeDomainData(timeData);
+
+  const energy = freqData.slice(0, 60).reduce((a,b)=>a+b,0) / (60*255);
+
+  drawBg(energy);
+
+  if (mode === 'bars') drawBars(freqData, energy);
+  else if (mode === 'wave') drawWave(timeData);
+  else if (mode === 'radial') drawRadial(freqData, energy);
+  else if (mode === 'spiral') drawSpiral(freqData, tick);
+
+  drawParticles();
+
+  const elapsed = audioCtx.currentTime - startTime;
+  const pct = Math.min(elapsed / audioBuffer.duration, 1) * 100;
+  document.getElementById('progress-fill').style.width = pct + '%';
+  document.getElementById('cur-time').textContent = fmt(elapsed);
+}
+</script>
+</body>
+</html>
